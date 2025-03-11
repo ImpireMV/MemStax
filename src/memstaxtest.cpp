@@ -25,6 +25,8 @@ static void UnitTest_MemTrace_FileNoClear();
 static void UnitTest_MemTrace_FileDifferent();
 static void UnitTest_MemTrace_CheckGetFile();
 
+static void UnitTest_MemCallback_SendConsoleCallbackMsg();
+
 static MEMERR CustomMemTrace(const string &, fstream *);
 
 int main(int argc, char** argv)
@@ -57,6 +59,12 @@ int main(int argc, char** argv)
     // , and writting with log again with seperate asserts. Since they relate
     // closly and may cause odd interactions with one another test all 3.
     UnitTest_MemTrace_CheckGetFile();
+  }
+
+  if(strncmp(argv[0], "MemCallback", sizeof("MemCallback")) || runAllTests)
+  {
+    // Test sending a trace message to the console with the callback class
+    UnitTest_MemCallback_SendConsoleCallbackMsg();
   }
 
   return 0;
@@ -176,6 +184,27 @@ void UnitTest_MemTrace_CheckGetFile()
 
   // Log to file
   error = trace.LogMessage("Testing Get File Log Write");
+
+  // Make sure no errors occured
+  assert(error == MEMERR_NO_ERR);
+}
+
+// Callback test
+
+void UnitTest_MemCallback_SendConsoleCallbackMsg()
+{
+  // Create a trace and callback class
+  MemTrace trace;
+  MemCallback callback(&trace);
+
+  // Attempt to perform a callback
+  MEMERR error = callback.PerformCallback(MEMCALL_ALLOC);
+
+  // Make sure no errors occured
+  assert(error == MEMERR_NO_ERR);
+
+  // Attempt to perform a different callback 
+  error = callback.PerformCallback(MEMCALL_DEALLOC);
 
   // Make sure no errors occured
   assert(error == MEMERR_NO_ERR);

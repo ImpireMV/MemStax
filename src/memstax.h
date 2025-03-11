@@ -8,6 +8,10 @@
 //    Additionally, we still allow for heap allocaiton but it must
 //      be exlicetly requested and is not recommened.
 
+// Make sure the h file is only compiled once
+#ifndef MEMSTAX_H
+#define MEMSTAX_H
+
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -16,6 +20,10 @@
 
 namespace Stax
 {
+  // Type defs to ensure class names are usable before definitions
+  class MemTrace;
+  class MemCallback;
+
   /*!
    * An enum used to report different errors that occur during different
    * memory related functions.
@@ -63,7 +71,7 @@ namespace Stax
   };
 
   //! A definition used for callback functions
-  using memcallbackfunc = MEMERR (*)(const MEMCALL &, const size_t &);
+  using memcallbackfunc = MEMERR (*)(const MEMCALL &, const size_t &, MemTrace *);
   //! A definition used for trace functions
   using memtracefunc = MEMERR (*)(const std::string &, std::fstream *);
 
@@ -323,6 +331,23 @@ namespace Stax
       std::string filePath;
   };
 
+  /*!
+   * \class 
+   *    MemCallback
+   * \brief
+   *    A helper class that helps organize and inteperet callbacks sent
+   *    by the memory system to the desired location while returning relavent
+   *    information to the user
+   *
+   *    Operations included:
+   *
+   *
+   * \deprecated
+   *    N/A
+   *
+   * \bug
+   *    N/A
+   */
   class MemCallback
   {
     public:
@@ -338,9 +363,10 @@ namespace Stax
        *    A callback funciton as defined by memcallbackfunc that will recieve
        *    messages from allocs and deallocations
        */
-      MemCallback(const bool &logging = false
-          , memcallbackfunc newCallback = CallbackFunc, MEMERR *error = nullptr)
-        : callback(newCallback), callbackLog(logging) 
+      MemCallback(MemTrace *in_traceClass = nullptr
+          , memcallbackfunc in_callback = CallbackFunc
+          , MEMERR *error = nullptr)
+        : traceClass(in_traceClass), callback(in_callback)
       {
         // Check for a valid callback function enabling callback funcitonality
         // if it is
@@ -354,12 +380,40 @@ namespace Stax
           *error = MEMERR_INVALID_FUNCTION_PARAMETER;
         }
       }
+
+      /*!
+       *
+       */
       ~MemCallback()
       {
         if(callback)
         {
           callbackInit = false;
         }
+      }
+
+      /*!
+       * Performs a callback but calling the classes callback funciton that
+       * the user has provided. The user is required to give a msg but can
+       * leave the size blank if they wish to ignore it and it will print
+       * out a 0 by default
+       *
+       * \param msg
+       *    The callback message being sent to the callback manager
+       * \param memSize
+       *    The size of the object being allocated into memory
+       *
+       * \returns
+       *    An error message for error checking
+       */
+      MEMERR PerformCallback(const MEMCALL &msg, const size_t &memSize = 0)
+      {
+        if(callbackInit)
+        {
+          return callback(msg, memSize, traceClass);
+        }
+
+        return MEMERR_UNINITALIZED;
       }
   
       /*!
@@ -379,34 +433,50 @@ namespace Stax
 
 
     private:
-      // TODO: Create some sort of trace function that can take in a filepath
-      //  and write to it if requested by user. If no filepath is given then
-      //  the trace will simply write to the console using iostream if logging
-      //  is enabled by the user. Additionally the user can add their own trace
-      //  log to the callback function to handle messaging them self without
-      //  handing the tracking of allocations, deallocations, and more!
-      static MEMERR CallbackFunc(const MEMCALL &msg, const size_t &memSize)
+      // TODO: figure out if we want seperate alloc and dealloc counters for 
+      //  each callback class. If we so then we need some sort of way to 
+      //  differentiate which one we want. Most likley a struct that each
+      //  class passes into the callback func with a bunch of data that can
+      //  be added to allowing you to derive it and add relavant info :)
+      static MEMERR CallbackFunc(const MEMCALL &msg, const size_t &memSize
+          , MemTrace *traceCall)
       {
+        // Create a string to input a trace message into
+        std::string traceMsg;
+
+        // Check what callback is being performed
         switch(msg)
         {
           case MEMCALL_ALLOC:
             ++allocs;
             memInUse += memSize;
+            traceMsg = "Allocating Memory of size: " 
+              + std::to_string(memSize);
             break;
           case MEMCALL_DEALLOC:
             ++deallocs;
             memInUse -= memSize;
+            traceMsg = "Deallocating Memory of size: " 
+              + std::to_string(memSize);
             break;
+        }
+
+        // If there is a trace message then give the trace log 
+        // the callbacks message
+        if(traceCall)
+        {
+          traceCall->LogMessage(traceMsg);
         }
 
         return MEMERR_NO_ERR;
       }
-      static uint32_t allocs, deallocs;
-      static size_t memInUse;
-      static bool callbackInit;
-      
+      static inline uint32_t allocs = 0;
+      static inline uint32_t deallocs = 0;
+      static inline size_t memInUse = 0;
+
+      bool callbackInit;
+      MemTrace *traceClass;
       memcallbackfunc callback;
-      bool callbackLog;
   };
 
   /*!
@@ -558,3 +628,5 @@ namespace Stax
     private:
   };
 }
+
+#endif // MEMSTAX_H
