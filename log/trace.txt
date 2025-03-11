@@ -1,0 +1,5 @@
+Test Default Trace Log
+Test Default Trace Log (2)
+Test Default Trace Log (2)
+Testing Get File Direct Write
+Testing Get File Log Write
