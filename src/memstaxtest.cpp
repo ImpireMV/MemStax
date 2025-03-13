@@ -27,6 +27,8 @@ static void UnitTest_MemTrace_CheckGetFile();
 
 static void UnitTest_MemCallback_SendConsoleCallbackMsg();
 
+static void UnitTest_MemHeap_TestDefaults();
+
 static MEMERR CustomMemTrace(const string &, fstream *);
 
 int main(int argc, char** argv)
@@ -65,6 +67,12 @@ int main(int argc, char** argv)
   {
     // Test sending a trace message to the console with the callback class
     UnitTest_MemCallback_SendConsoleCallbackMsg();
+  }
+  
+  if(strncmp(argv[0], "MemHeap", sizeof("MemHeap")) || runAllTests)
+  {
+    // Test the defaults of allocating and deallocating a standard type
+    UnitTest_MemHeap_TestDefaults();
   }
 
   return 0;
@@ -209,6 +217,33 @@ void UnitTest_MemCallback_SendConsoleCallbackMsg()
   // Make sure no errors occured
   assert(error == MEMERR_NO_ERR);
 }
+
+// Test MemHeap
+
+void UnitTest_MemHeap_TestDefaults()
+{
+  MemTrace trace;
+  MemCallback callback(&trace);
+  MemHeap heap;
+
+  MEMERR error = heap.InitalizeHeapMem(MemHeap::defaultPageSize
+      , MemHeap::defaultNumOfPages, &callback);
+
+  assert(error == MEMERR_NO_ERR);
+
+  // Create a pointer to test
+  int* p_int = nullptr;
+
+  heap.Allocate(p_int);
+
+  assert(p_int != nullptr);
+
+  heap.Deallocate(p_int);
+
+  assert(p_int == nullptr);
+}
+
+// Custom callbacks
 
 MEMERR CustomMemTrace(const string &msg, fstream *)
 {
