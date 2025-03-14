@@ -227,7 +227,7 @@ void UnitTest_MemHeap_TestDefaults()
   MemHeap heap;
 
   MEMERR error = heap.InitalizeHeapMem(MemHeap::defaultPageSize
-      , MemHeap::defaultNumOfPages, &callback);
+      , MemHeap::defaultNumOfPages, MemHeap::defaultAllignment, &callback);
 
   assert(error == MEMERR_NO_ERR);
 

@@ -525,8 +525,31 @@ namespace Stax
         // Create an error tracking object
         MEMERR error = MEMERR_NO_ERR;
 
+        // Initalize all objects for the page
+        // Set number of pages to 0 to make sure it is initalized
+        numOfPages = 0;
+        // Update the page size and number of pages
+        maxPageSize = in_pageSize;
+        maxPages = in_numOfPages;
+        // Update the allignment of each object
+        allignment = in_allignment;
+
+        // Check to see if the callback given is valid and assign it 
+        if(callbackClass)
+        {
+          callback = callbackClass;
+        }
+
         // Allocate the pointers for the page
-        error = AllocatePagePtrs();
+        error = TryAllocate<uint8_t*>(pages, numOfPages);
+        // Allocate the pointers for the page sizes
+        error = TryAllocate<size_t>(pageSizes, maxPages);
+
+        // Set all page sizes to 0 to initalize them
+        for(size_t i = 0 ; i < maxPages; ++i)
+        {
+          pageSizes[i] = 0;
+        }
 
         // Return the error if something failed
         if(error != MEMERR_NO_ERR)
@@ -534,7 +557,7 @@ namespace Stax
           return error;
         }
 
-        // Allocate the current page
+        // Allocate the first page
         error = AllocatePage();
 
         // Return the error if something failed
@@ -543,21 +566,8 @@ namespace Stax
           return error;
         }
         
-        // Turn on the heap
+        // Turn on the heap to enable allocation
         heapInitalized = true;
-        // Update the page size and number of pages
-        maxPageSize = in_pageSize;
-        maxPages = in_numOfPages;
-        // Update the allignment of each object
-        allignment = in_allignment;
-        // Update current page 
-        currentPage = pages[numOfPages - 1];
-        pageSize = 0;
-        // Check to see if the callback given is valid and assign it 
-        if(callbackClass)
-        {
-          callback = callbackClass;
-        }
 
         return MEMERR_NO_ERR;
       }
@@ -579,10 +589,6 @@ namespace Stax
        * double allocation and returns errors properly in case an issue
        * occurs.
        *
-       * TODO: Create a memory tracker that takes in strings and has it's own
-       *  flags. With the possibilty to be polymorphized so that more
-       *  custimization can be made.
-       *
        * \param p_Obj
        *  A pointer that will be filled with a new obj allocated on success
        * \param callbackFun
@@ -594,29 +600,50 @@ namespace Stax
        * An example of the callback funciton as it will be taken by 
        * the function.
        *
-       * void (*)(const std::string &string)
+       * TODO: PROVIDE BETTER EXAMPLE
+       *  void (*)(const std::string &string)
        *
        * \returns 
        *  A MEMERR indicating if any errors occured during allocation
        *  which helps the use avoid doing unnecessary error checking
        *  and bloating their own code/program.
        */
-      // TODO: add an array of sizes for each page to show how much space
-      //  each page has left and allow them to allocate within themselves
-      //  if there is space if the current page doesn't have any!
-      //  Each page also needs a currentSize so that have to be an array
       template<typename T>
       MEMERR Allocate(T *&p_Obj)
       { 
+        // Create a variable to track errors
+        MEMERR error = MEMERR_NO_ERR;
+
         // Get the total object size within the page
         size_t objPageSize = sizeof(T) + (sizeof(T) % allignment);
 
-        // Check to make sure that we have space within the current page
-        if(objPageSize < pageSize)
+        // Create an object to find out which page to allocate to
+        size_t currentPage = numOfPages;
+
+        // Check all pages for space
+        for(size_t i = 0 ; i < numOfPages; ++i)
         {
-          // If we cannot allocate within this page then consider it done 
-          // and allocate another page
-          AllocatePage();
+          // If we find that a page has enough size remaining then set
+          // the current page to that page and break from the loop
+          if(objPageSize < (maxPageSize - pageSizes[i]))
+          {
+            currentPage = i;
+            break;
+          }
+        }
+
+        // If the current page is the same or greater than the number of 
+        // pages that means that a page with enoguh size was not found so 
+        // we will attempt to allocate a new one
+        if(currentPage >= numOfPages)
+        {
+          error = AllocatePage();
+          
+          // Check to see if there was an error and return if there was
+          if(error != MEMERR_NO_ERR)
+          {
+            return error;
+          }
         }
 
         // Check for a double allocation to avoid allocating over an 
@@ -627,82 +654,27 @@ namespace Stax
           return MEMERR_DOUBLE_ALLOC;
         }
 
-        // Attempt to allocate a new object catching any exceptions thrown
-        // giving the user the most accurate error result we can
-        try
+        // Attempt to allocate the object
+        error = TryAllocate<T>(p_Obj, 1
+            , pages[numOfPages - 1] + pageSizes[numOfPages - 1]);
+
+        // Check if any errors have occured and return if they have
+        if(error != MEMERR_NO_ERR)
         {
-          p_Obj = new(pages[numOfPages - 1] + pageSize)T();
-
-          // Set aside the space for the new object allocation 
-          // and it's allignment
-          pageSize += objPageSize; 
-          
+          return error;
         }
-        // TODO: Look into making a helper callback perform func that
-        //  checks for returns. Maybe it takes a pointer and only returns 
-        //  something if it is an error
-        catch(const std::bad_alloc &e)
-        {
-          // Initalize to avoid a non-error passing an error
-          MEMERR error = MEMERR_NO_ERR;
 
-          // If there was an error with calling new then call the callback
-          // funciton if avaliable to print a message then return
-          // an out of mem error to the user so they are able to respond
-          // appropriatly
-          if(callback)
-          {
-            error = callback->PerformCallback(MEMCALL_MEM_ERR, sizeof(T));
-          }
+        // Update the page size if we have successfully allocated
+        pageSizes[numOfPages - 1] += objPageSize; 
 
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
-
-          return MEMERR_OUT_OF_MEM;
-        }
-        catch(const std::exception &e)
-        {
-          // Initalize to avoid a non-error passing an error
-          MEMERR error = MEMERR_NO_ERR;
-
-          // If there was an error with calling new then call the callback
-          // funciton if avaliable to print a message then return
-          // an out of mem error to the user so they are able to respond
-          // appropriatly
-          if(callback)
-          {
-            error = callback->PerformCallback(MEMCALL_MEM_ERR, sizeof(T));
-          }
-
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
-
-          return MEMERR_UNKNOWN;
-        }
-          
         // Check to see if debug messages are disabled... if not then notify the user
         //  we have allocated a new object by calling their desired callback
         if(!(memFlags & MEMFLAGS_DISABLE_DEBUG_MSG) && callback)
         {
-          MEMERR error = callback->PerformCallback(MEMCALL_ALLOC, sizeof(T));
-
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
+          error = callback->PerformCallback(MEMCALL_ALLOC, sizeof(T));
         }
 
-        return MEMERR_NO_ERR;
+        return error;
       }
 
 
@@ -754,12 +726,94 @@ namespace Stax
       uint8_t memFlags;
       MemCallback *callback;
       size_t allignment;
-      size_t pageSize;
       size_t numOfPages;
       size_t maxPages;
       size_t maxPageSize;
-      uint8_t* currentPage;
+      size_t* pageSizes;
       uint8_t** pages;
+
+      template<typename T>
+      MEMERR TryAllocate(T *&p_obj, const size_t sizeOverride = 1
+          , void *addressPtr = nullptr)
+      {
+        // Attempt to allocate a new object of designated size at
+        // given address if provided 
+        try
+        {
+          if(addressPtr)
+          {
+            if(sizeOverride > 1)
+            {
+              p_obj = new(addressPtr) T[sizeOverride];
+            }
+            else
+            {
+              p_obj = new(addressPtr) T;
+            }
+          }
+          else
+          {
+            if(sizeOverride > 1)
+            {
+              p_obj = new T[sizeOverride];
+            }
+            else
+            {
+              p_obj = new T;
+            }
+          }
+        }
+        catch(const std::bad_alloc &e)
+        {
+          // Initalize to avoid a non-error passing an error
+          MEMERR error = MEMERR_NO_ERR;
+
+          // If there was an error with calling new then call the callback
+          // funciton if avaliable to print a message then return
+          // an out of mem error to the user so they are able to respond
+          // appropriatly
+          if(callback)
+          {
+            error = callback->PerformCallback(MEMCALL_MEM_ERR
+                , sizeof(T) * sizeOverride);
+          }
+
+          // Make sure no errors occured during callback... 
+          // if there was an error then return the error to user :)
+          if(error != MEMERR_NO_ERR)
+          {
+            return error;
+          }
+
+          return MEMERR_OUT_OF_MEM;
+        }
+        catch(const std::exception &e)
+        {
+          // Initalize to avoid a non-error passing an error
+          MEMERR error = MEMERR_NO_ERR;
+
+          // If there was an error with calling new then call the callback
+          // funciton if avaliable to print a message then return
+          // an out of mem error to the user so they are able to respond
+          // appropriatly
+          if(callback)
+          {
+            error = callback->PerformCallback(MEMCALL_MEM_ERR
+                , sizeof(T) * sizeOverride);
+          }
+
+          // Make sure no errors occured during callback... 
+          // if there was an error then return the error to user :)
+          if(error != MEMERR_NO_ERR)
+          {
+            return error;
+          }
+
+          return MEMERR_UNKNOWN;
+        }
+
+        return MEMERR_NO_ERR;
+      }
 
       MEMERR AllocatePage()
       {
@@ -770,127 +824,17 @@ namespace Stax
           return MEMERR_OUT_OF_MEM;
         }
 
-        // Allocate a new page and return the pointer
-        try
+        // Attempt to allocate a new page
+        MEMERR error = TryAllocate<uint8_t>(pages[numOfPages - 1], maxPageSize); 
+
+        // If something failed undo the incrementing of pages
+        if(error != MEMERR_NO_ERR)
         {
-          // Allocate the specified number of bytes per page for a new page
-          // at the current page number in the array
-          pages[numOfPages - 1] = new uint8_t[maxPageSize];
-        }
-        catch(const std::bad_alloc &e)
-        {
-          // Initalize to avoid a non-error passing an error
-          MEMERR error = MEMERR_NO_ERR;
-
-          // If there was an error with calling new then call the callback
-          // funciton if avaliable to print a message then return
-          // an out of mem error to the user so they are able to respond
-          // appropriatly
-          if(callback)
-          {
-            error = callback->PerformCallback(MEMCALL_MEM_ERR
-                , sizeof(maxPageSize));
-          }
-
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
-
-          // Decrement the number of pages back to what it was
           --numOfPages;
-
-          return MEMERR_OUT_OF_MEM;
         }
-        catch(const std::exception &e)
-        {
-          // Initalize to avoid a non-error passing an error
-          MEMERR error = MEMERR_NO_ERR;
-
-          // If there was an error with calling new then call the callback
-          // funciton if avaliable to print a message then return
-          // an out of mem error to the user so they are able to respond
-          // appropriatly
-          if(callback)
-          {
-            error = callback->PerformCallback(MEMCALL_MEM_ERR
-                , sizeof(maxPageSize));
-          }
-
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
-          
-          // Decrement the number of pages back to what it was
-          --numOfPages;
-
-          return MEMERR_UNKNOWN;
-        }
-
-        return MEMERR_NO_ERR;
-      }
-
-      MEMERR AllocatePagePtrs()
-      {
-        // Allocate all the pages that are requested by the user
-        try
-        {
-          // Attempt to allocate the page pointers
-          pages = new uint8_t*[numOfPages];
-        }
-        catch(const std::bad_alloc &e)
-        {
-          // Initalize to avoid a non-error passing an error
-          MEMERR error = MEMERR_NO_ERR;
-
-          // If there was an error with calling new then call the callback
-          // funciton if avaliable to print a message then return
-          // an out of mem error to the user so they are able to respond
-          // appropriatly
-          if(callback)
-          {
-            error = callback->PerformCallback(MEMCALL_MEM_ERR
-                , sizeof(numOfPages));
-          }
-
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
-
-          return MEMERR_OUT_OF_MEM;
-        }
-        catch(const std::exception &e)
-        {
-          // Initalize to avoid a non-error passing an error
-          MEMERR error = MEMERR_NO_ERR;
-
-          // If there was an error with calling new then call the callback
-          // funciton if avaliable to print a message then return
-          // an out of mem error to the user so they are able to respond
-          // appropriatly
-          if(callback)
-          {
-            error = callback->PerformCallback(MEMCALL_MEM_ERR
-                , sizeof(numOfPages));
-          }
-
-          // Make sure no errors occured during callback... 
-          // if there was an error then return the error to user :)
-          if(error != MEMERR_NO_ERR)
-          {
-            return error;
-          }
-        }
-
-        return MEMERR_NO_ERR;
+        
+        // Return whatever message try allocate returned
+        return error;
       }
   };
 
